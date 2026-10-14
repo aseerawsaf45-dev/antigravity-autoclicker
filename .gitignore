@@ -1,0 +1,12 @@
+# Runtime logs and diagnostic dumps
+autoclick.log
+diagnose-output.txt
+
+# Editor / IDE metadata
+.vscode/
+.idea/
+
+# OS artifacts
+Thumbs.db
+desktop.ini
+*.tmp
