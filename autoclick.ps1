@@ -149,6 +149,10 @@ $jsTemplate = @'
   const matchesLabel = (text, label) => {
     if (!text) return false;
     if (text === label) return true;
+    if (label === 'continue') {
+      // For 'continue', only match exact "continue" or shortcut hints, NEVER third-party OAuth logins ("Continue with Google")
+      return text === 'continue' || text.startsWith('continue:') || text.startsWith('continue-');
+    }
     if (text.startsWith(label + ' ') || text.startsWith(label + ':') || text.startsWith(label + '-')) return true;
     if (label === 'allow' && (text.includes('allow this time') || text.includes('always allow') || text.startsWith('allow'))) return true;
     if (label === 'accept' && (text.startsWith('accept') || text.includes('accept all'))) return true;
@@ -157,37 +161,110 @@ $jsTemplate = @'
   };
 
   // ==============================================================
-  // PRIORITY 1: AUTO-SUBMIT BUTTON
+  // PRIORITY 1: ANTIGRAVITY IDE INTERACTIVE PROMPTS & SUBMIT
+  // Specifically optimized for Antigravity IDE ask_question and
+  // ask_permission widgets (CZ / PWb React components).
+  // Ensures the first / recommended option remains selected and
+  // NEVER switches to the write-in / "No" option.
   // ==============================================================
+  let questionBtn = null;
+  let questionRoot = null;
+  for (const r of roots) {
+    try {
+      const btn = r.querySelector('[data-testid="interaction-continue-button"]');
+      if (btn && isSafe(btn)) {
+        questionBtn = btn;
+        questionRoot = r;
+        break;
+      }
+    } catch (e) {}
+  }
+
+  if (questionBtn && questionRoot) {
+    const qContainer = questionBtn.closest('.no-focus-agent-input') ||
+                       questionBtn.closest('[role="radiogroup"]') ||
+                       questionBtn.closest('.relative') ||
+                       questionRoot;
+
+    // 1. Gather all legitimate options (excluding the "No" / "Other" write-in container)
+    let optionLabels = Array.from(qContainer.querySelectorAll('[data-testid="ask-question-option"]'));
+
+    if (optionLabels.length === 0) {
+      optionLabels = Array.from(qContainer.querySelectorAll('label, div[role="radio"]'))
+        .filter(el => {
+          const input = el.querySelector('input') || el;
+          if (input.value === '__write_in__') return false;
+          if (el.querySelector('[data-testid="ask-question-writein"]')) return false;
+          const t = getElementText(el);
+          if (t === 'no' || t.startsWith('no ') || t.startsWith('other')) return false;
+          return !!(el.querySelector('input[type="radio"], input[type="checkbox"]') || el.getAttribute('role') === 'radio');
+        });
+    }
+
+    // 2. Check if the "No" / write-in option is currently active
+    const writeInRadio = qContainer.querySelector('input[value="__write_in__"]');
+    const writeInActive = !!(writeInRadio && writeInRadio.checked) ||
+                          !!qContainer.querySelector('textarea[data-testid="ask-question-writein"]:focus');
+
+    // 3. Check if any legitimate option is currently selected
+    let selectedOption = null;
+    for (const opt of optionLabels) {
+      const input = opt.querySelector('input') || (opt.tagName === 'INPUT' ? opt : null);
+      const isChecked = (input && (input.checked || input.getAttribute('aria-checked') === 'true')) ||
+                        opt.classList.contains('bg-secondary') ||
+                        opt.getAttribute('data-state') === 'checked' ||
+                        opt.getAttribute('aria-checked') === 'true';
+      if (isChecked) {
+        selectedOption = opt;
+        break;
+      }
+    }
+
+    // 4. Identify the first option (prioritizing '(Recommended)' if present)
+    const targetFirstOption = optionLabels.find(o => getElementText(o).includes('recommended')) ||
+                              optionLabels[0];
+
+    // 5. If "No" / write-in was activated, OR no valid option is selected:
+    // Select the first option and NEVER touch the "No" option!
+    if (writeInActive || !selectedOption) {
+      if (targetFirstOption) {
+        simulateClick(targetFirstOption);
+        const optInput = targetFirstOption.querySelector('input');
+        if (optInput) {
+          try {
+            optInput.checked = true;
+            optInput.dispatchEvent(new Event('change', { bubbles: true }));
+          } catch (x) {}
+        }
+        return 'selected first option: ' + (getElementText(targetFirstOption) || 'Option 1');
+      }
+    }
+
+    // 6. Legitimate option is selected: STAY on first option and submit!
+    if (!questionBtn.disabled && questionBtn.getAttribute('aria-disabled') !== 'true') {
+      simulateClick(questionBtn);
+      return 'clicked submit button: ' + (questionBtn.innerText || 'Submit').trim();
+    }
+
+    // Button is waiting for React state update
+    return 'none';
+  }
+
+  // 1B. Fallback: General Submit button in standard dialogs/modals
   const submitBtn = allButtons.find(b => {
     const txt = getElementText(b);
     return txt === 'submit' || txt.startsWith('submit ') || txt.startsWith('submit:');
   });
 
   if (submitBtn) {
-    // Check if submit button is inside an interactive prompt or modal container
-    const modalContainer = submitBtn.closest('[role="dialog"], [role="alertdialog"], .modal, div[class*="dialog"], div[class*="modal"]') ||
-                           submitBtn.parentElement?.parentElement;
-
+    const modalContainer = submitBtn.closest('[role="dialog"], [role="alertdialog"], .modal, div[class*="dialog"], div[class*="modal"]');
     if (modalContainer) {
-      // Check if there are options or radio choices that need selection
-      const radios = Array.from(modalContainer.querySelectorAll('[role="radio"], input[type="radio"], [role="checkbox"]'));
+      const radios = Array.from(modalContainer.querySelectorAll('[role="radio"], input[type="radio"], [role="checkbox"]'))
+        .filter(r => r.value !== '__write_in__' && !getElementText(r.parentElement).toLowerCase().startsWith('no'));
       const hasSelectedRadio = radios.some(r => r.getAttribute('aria-checked') === 'true' || r.checked);
 
       if (radios.length > 0 && !hasSelectedRadio) {
-        // Select the first radio / recommended option
         simulateClick(radios[0]);
-      } else {
-        // Check for clickable option rows like "Yes, allow this time" or "(Recommended)"
-        const optionRows = Array.from(modalContainer.querySelectorAll('div, span'))
-          .filter(e => isVisible(e) && window.getComputedStyle(e).cursor === 'pointer');
-        const allowOption = optionRows.find(e => {
-          const t = getElementText(e);
-          return t.includes('yes, allow') || t.includes('always allow') || t.includes('recommended');
-        });
-        if (allowOption && !hasSelectedRadio) {
-          simulateClick(allowOption);
-        }
       }
     }
 

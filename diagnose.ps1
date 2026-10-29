@@ -86,6 +86,42 @@ $js = @'
   visit(document);
 
   const allElements = [];
+  let questionnaireInfo = null;
+
+  // Check for Antigravity interactive questionnaire/prompt
+  for (const r of roots) {
+    try {
+      const qBtn = r.querySelector('[data-testid="interaction-continue-button"]');
+      if (qBtn) {
+        const qContainer = qBtn.closest('.no-focus-agent-input') ||
+                           qBtn.closest('[role="radiogroup"]') ||
+                           qBtn.closest('.relative') ||
+                           r;
+        const options = Array.from(qContainer.querySelectorAll('[data-testid="ask-question-option"]')).map(opt => {
+          const input = opt.querySelector('input') || opt;
+          const isChecked = (input && (input.checked || input.getAttribute('aria-checked') === 'true')) ||
+                            opt.classList.contains('bg-secondary') ||
+                            opt.getAttribute('data-state') === 'checked';
+          return {
+            text: getElementText(opt),
+            checked: !!isChecked
+          };
+        });
+        const writeInRadio = qContainer.querySelector('input[value="__write_in__"]');
+        const writeInActive = !!(writeInRadio && writeInRadio.checked) ||
+                              !!qContainer.querySelector('textarea[data-testid="ask-question-writein"]:focus');
+        questionnaireInfo = {
+          buttonText: getElementText(qBtn),
+          buttonDisabled: qBtn.disabled || qBtn.getAttribute('aria-disabled') === 'true',
+          optionsCount: options.length,
+          options,
+          writeInActive
+        };
+        break;
+      }
+    } catch (x) {}
+  }
+
   roots.forEach(r => {
     try {
       r.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"], div, span, a').forEach(e => {
@@ -111,6 +147,7 @@ $js = @'
 
   return JSON.stringify({
     title: document.title,
+    questionnaire: questionnaireInfo,
     candidateCount: allElements.length,
     candidates: allElements.slice(0, 30)
   });
@@ -161,6 +198,15 @@ foreach ($t in $targets) {
     try {
       $resJson = Invoke-Cdp $t.webSocketDebuggerUrl $js
       $parsed = $resJson | ConvertFrom-Json
+      if ($parsed.questionnaire) {
+        $q = $parsed.questionnaire
+        $disStr = if ($q.buttonDisabled) { "disabled" } else { "enabled" }
+        $lines += "  [QUESTIONNAIRE] Button: '$($q.buttonText)' ($disStr) | Options: $($q.optionsCount) | WriteInActive: $($q.writeInActive)"
+        foreach ($opt in $q.options) {
+          $chkStr = if ($opt.checked) { "[x]" } else { "[ ]" }
+          $lines += "    $chkStr Option: '$($opt.text)'"
+        }
+      }
       $lines += "  Candidates found: $($parsed.candidateCount)"
       foreach ($c in $parsed.candidates) {
         $btnLabel = if ($c.isButton) { "[BUTTON]" } else { "[ELEMENT]" }

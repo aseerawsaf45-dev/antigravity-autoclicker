@@ -14,7 +14,8 @@ It automatically detects and dispatches confirmations for interactive agent prom
 ## ⚡ Highlights
 
 - **Zero Cursor Takeover (Headless DOM Injection)**: Unlike generic macro clickers or AutoHotkey scripts, this tool **never moves or hijacks your physical mouse cursor**. You can continue typing, coding, and browsing without interruption.
-- **Smart Modal & Option Auto-Selection**: When Antigravity IDE prompts an interactive multiple-choice question (`ask_question` modal) that requires selecting an option before submitting, the script automatically selects Option 1 / `(Recommended)` / `Yes, allow this time` before dispatching the `Submit ↵` event.
+- **Smart Modal & Option Auto-Selection**: Specifically engineered for Antigravity IDE's interactive questionnaires and permission dialogs (`ask_question` and `ask_permission`). Stays locked on Option 1 / `(Recommended)` / `Yes, allow this time`, never selects or switches to the write-in / "No" option, and automatically submits once ready.
+- **OAuth & Login Protection**: Strictly isolates button labels like `continue` so it will never accidentally click third-party authentication buttons (such as "Continue with Google").
 - **Unicode & Shortcut Normalization**: Recognizes and strips Unicode carriage return characters (`↵`, `⏎`, `\u21B5`, `\u23CE`) and keyboard hint annotations like `(Ctrl+Enter)` or `(Enter)` embedded in modern dynamic button labels.
 - **Strict Workbench Safeguards (Zero False Positives)**: Explicitly blacklists the top-level Menubar, Activity Bar, Sidebars, Editor Tabs, Statusbar, and Monaco code editing surfaces. It will **never** click your code, menu items, or tabs.
 - **Full Mouse/Pointer Event Lifecycle**: Fires the complete event sequence (`pointerdown` → `mousedown` → `pointerup` → `mouseup` → `click`) to ensure compatibility with modern UI libraries (React 18+, Radix UI, Lucide, Tailwind).
@@ -157,24 +158,33 @@ The auto-clicker processes detected elements using a 3-tier priority matrix:
        │
        ▼
 ┌──────────────────────────────────────────────┐
-│ Priority 1: Submit Button & Option Selection │
-│ - Finds buttons containing "Submit"          │
-│ - Checks if inside modal dialog              │
-│ - Auto-selects 1st radio / recommended option│
+│ Priority 1: Interactive Questionnaires       │
+│ - Detects Antigravity prompt & continue button│
+│ - Keeps/selects 1st radio / recommended option│
+│ - Hard-blocks the "No" / write-in input      │
+│ - Dispatches Submit / Continue click chain   │
+└──────────────────────┬───────────────────────┘
+                       │ (if no Questionnaire found)
+                       ▼
+┌──────────────────────────────────────────────┐
+│ Priority 2: Standard Modals & Submit Buttons │
+│ - Finds general Submit buttons               │
+│ - Auto-selects 1st option if in modal dialog │
 │ - Fires full pointer/mouse click chain       │
 └──────────────────────┬───────────────────────┘
                        │ (if no Submit button found)
                        ▼
 ┌──────────────────────────────────────────────┐
-│ Priority 2: Action Buttons                   │
+│ Priority 3: Action Buttons                   │
 │ - Matches against $labels list               │
+│ - Protected matching (no "Continue w/ Google")│
 │ - "run" strictly scoped to dialogs/terminals │
 │ - Clicks real <button> or [role="button"]    │
 └──────────────────────┬───────────────────────┘
                        │ (if no Action button found)
                        ▼
 ┌──────────────────────────────────────────────┐
-│ Priority 3: Modal-Scoped Clickables          │
+│ Priority 4: Modal-Scoped Clickables          │
 │ - Scans inside [role="dialog"], .modal, etc. │
 │ - Targets cursor:pointer spans/divs          │
 │ - Never triggers outside active modals       │
